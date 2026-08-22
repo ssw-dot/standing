@@ -1,0 +1,8 @@
+.env
+.env.*
+!.env.example
+__pycache__/
+*.pyc
+IDEA.md
+CLICS_STANDING.md
+ejemplos/_horizon.txt
