@@ -115,6 +115,42 @@ same sentence. Without that second filter, *"the TRL definition is available in
 the General Annexes"* triggered it too — and if everything defers, nothing
 does.
 
+## The same document, three different verdicts
+
+Run four times over one call for proposals, Standing answered ELIGIBLE once,
+NOT ELIGIBLE twice, and CANNOT BE DETERMINED once. For a tool whose whole pitch
+is *defensible and auditable*, answering differently on the second run is worse
+than answering wrong on the first.
+
+**It was not the verdict logic.** The model returns `["at least two years"]` on
+one read and `["2 years"]` on the next. Strip the threshold words and the
+condition passes for an enumeration, text comparison runs, and `4 years` does
+not equal `2 years` — the four-years bug back through a different door. The
+first fix detected thresholds by their words, so it broke the moment the words
+were dropped.
+
+Two changes, and the second closes the class rather than the instance:
+
+**The threshold is read from the quote when the values do not carry it.** The
+quote is verified character-for-character against the document, so it is real
+text rather than the model's paraphrase. If the document says *at least two
+years*, it still says it.
+
+**Text comparison may never exclude when both sides are quantities.** `4 years`
+and `2 years` are not the same string and one still clears the other by double.
+Excluding there is precisely the invisible error this project exists to
+prevent, so that path now returns a doubt.
+
+And the extraction itself now reads each chunk three times and keeps only what
+appears in at least two. A requirement present in one read of three is sampling
+noise, not something the document states. Grouping is by normalised quote, not
+by key: the model invents the key and renames it between reads, while the quote
+is copied text.
+
+> Temperature 0 reduces Gemini's variance. It does not remove it. A screening
+> tool that answers differently on two runs cannot be defended to anyone, which
+> is the only thing it sells.
+
 ## Four failures found by running it, not by imagining it
 
 **0 · Eighty-eight thousand characters, zero requirements.**
@@ -170,7 +206,7 @@ document decides.
 
 ```bash
 cp .env.example .env        # fill in your four keys
-python -m unittest discover -s tests -p "test_*.py"     # 45 tests, no network
+python -m unittest discover -s tests -p "test_*.py"     # 62 tests, no network
 python -m standing ejemplos/convocatoria.pdf --perfil ejemplos/perfil.json
 ```
 
@@ -196,7 +232,7 @@ gives 200 and 403. Not in the docs.
 
 ## Tests
 
-45 tests, no network, no credentials. Most of them assert the same thing from
+62 tests, no network, no credentials. Most of them assert the same thing from
 different angles: **that a doubt does not turn into an exclusion.**
 
 A forecasting bug announces itself. This one does not — it returns a confident

@@ -149,7 +149,7 @@ def comprobar(req: Requisito, perfil: dict[str, object]) -> Comprobacion:
     # admitidos y compararlo como texto solo puede dar un no-elegible falso.
     # Este control va ANTES del comparador de texto para que ese camino no se
     # pueda tomar por accidente.
-    umbral = _umbral_de(req.valores)
+    umbral = _umbral_de(req)
     if umbral is not None:
         return _comprobar_cantidad(req, valores, umbral)
 
@@ -157,8 +157,41 @@ def comprobar(req: Requisito, perfil: dict[str, object]) -> Comprobacion:
     if encajan:
         return Comprobacion(req, True,
                             f"'{encajan[0]}' encaja con {list(req.valores)}")
+
+    # La red que cierra la clase entera de fallo.
+    #
+    # Si los dos lados son cantidades de la misma magnitud —"4 years" contra
+    # "2 years"— comparar TEXTO no puede decidir nada: no dicen lo mismo y aun
+    # asi uno puede cumplir de sobra. Excluir ahi es el falso NO_ELEGIBLE que
+    # este sistema existe para no dar.
+    #
+    # Va despues del encaje positivo a proposito: una coincidencia de texto
+    # sigue valiendo. Lo que se prohibe es EXCLUIR por texto cuando el caso era
+    # aritmetico y no se supo leer.
+    if _ambos_son_cantidades(valores, req.valores):
+        return Comprobacion(req, None,
+                            f"{valores} y {list(req.valores)} son cantidades y "
+                            f"no se pudo leer si el documento pide un minimo o "
+                            f"un maximo. No se excluye por no saber leerlo")
+
     return Comprobacion(req, False,
                         f"{valores} no encaja con ninguno de {list(req.valores)}")
+
+
+def _ambos_son_cantidades(mios: list[str], admitidos: tuple[str, ...]) -> bool:
+    """¿Los dos lados son numeros de la misma magnitud?"""
+    from .cantidades import leer_medida
+    a = [leer_medida(v) for v in mios]
+    b = [leer_medida(v) for v in admitidos]
+    if not any(x for x in a) or not any(x for x in b):
+        return False
+    unidades_a = {x.unidad for x in a if x and x.unidad}
+    unidades_b = {x.unidad for x in b if x and x.unidad}
+    # Sin unidad en algun lado no se puede afirmar que sean comparables, pero
+    # tampoco que no: dos numeros pelados siguen siendo dos numeros.
+    if not unidades_a or not unidades_b:
+        return True
+    return bool(unidades_a & unidades_b)
 
 
 def _comprobar_lugar(req: Requisito, valores: list[str]) -> Comprobacion:
@@ -267,14 +300,25 @@ def decidir(requisitos: list[Requisito], perfil: dict[str, object],
     return res
 
 
-def _umbral_de(valores: tuple[str, ...]):
-    """El primer umbral que se lea entre los valores admitidos, o None."""
+def _umbral_de(req: "Requisito"):
+    """Un umbral, buscado primero en los valores y luego EN LA CITA.
+
+    La cita es la parte de segunda: el modelo unas veces devuelve
+    `["at least two years"]` y otras `["2 years"]`, y cuando se come las
+    palabras del umbral, la condicion pasa por una enumeracion y el comparador
+    de texto excluye a quien cumple. La misma convocatoria daba ELEGIBLE o
+    NO_ELEGIBLE segun la ejecucion.
+
+    La cita no tiene ese problema porque **se verifica contra el documento**:
+    es texto real, no la parafrasis del modelo. Si el documento dice "at least
+    two years", ahi sigue diciendolo.
+    """
     from .cantidades import leer_umbral
-    for v in valores:
+    for v in req.valores:
         u = leer_umbral(v)
         if u is not None:
             return u
-    return None
+    return leer_umbral(req.cita)
 
 
 def _comprobar_cantidad(req: Requisito, valores: list[str], umbral

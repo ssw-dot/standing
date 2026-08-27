@@ -304,3 +304,90 @@ class TestDeteccionDeRemision(unittest.TestCase):
         t = ("Los requisitos de participacion se detallan en las bases "
              "reguladoras publicadas junto a esta convocatoria.")
         self.assertTrue(detectar_remision(t))
+
+
+class TestElUmbralEnLaCita(unittest.TestCase):
+    """El fallo de los cuatro anos, entrando por otra puerta.
+
+    Corriendo el sistema tres veces sobre la MISMA convocatoria salieron dos
+    veredictos distintos: ELEGIBLE una vez y NO_ELEGIBLE dos. No era
+    indeterminismo del veredicto — era que el modelo unas veces devuelve
+    `["at least two years"]` y otras `["2 years"]`. Sin las palabras del
+    umbral, la condicion pasa por una enumeracion y el comparador de texto
+    excluye a quien cumple de sobra.
+
+    La deteccion no puede depender de que el modelo conserve una frase. La
+    cita si es fiable: **se verifica contra el documento**, asi que es texto
+    real y no la parafrasis de nadie.
+    """
+
+    CITA = "Organisations must have been operating for at least two years."
+
+    def test_aunque_el_modelo_se_coma_las_palabras_del_umbral(self):
+        r = decidir([Requisito("antiguedad", self.CITA, ("2 years",))],
+                    {"antiguedad": "4 years"})
+        self.assertIs(r.veredicto, Veredicto.ELEGIBLE)
+
+    def test_y_sigue_funcionando_cuando_si_las_trae(self):
+        r = decidir([Requisito("antiguedad", self.CITA, ("at least two years",))],
+                    {"antiguedad": "4 years"})
+        self.assertIs(r.veredicto, Veredicto.ELEGIBLE)
+
+    def test_no_sobrecorrige_quien_no_cumple_sigue_fuera(self):
+        # Lo facil seria dejar de excluir nunca. Eso convierte la herramienta
+        # en una que siempre dice que si, que es igual de inutil.
+        r = decidir([Requisito("antiguedad", self.CITA, ("2 years",))],
+                    {"antiguedad": "1 year"})
+        self.assertIs(r.veredicto, Veredicto.NO_ELEGIBLE)
+
+    def test_los_tres_veredictos_son_estables_entre_llamadas(self):
+        # Mismo requisito, diez veces: la parte determinista tiene que dar
+        # siempre lo mismo. Es lo que se vende al comprador.
+        req = Requisito("antiguedad", self.CITA, ("2 years",))
+        vistos = {decidir([req], {"antiguedad": "4 years"}).veredicto
+                  for _ in range(10)}
+        self.assertEqual(len(vistos), 1)
+
+
+class TestNoExcluirPorTextoSiSonCantidades(unittest.TestCase):
+    """La red que cierra la clase, no la instancia.
+
+    Si los dos lados son cantidades de la misma magnitud, comparar TEXTO no
+    puede decidir: "4 years" y "2 years" no dicen lo mismo y aun asi uno cumple
+    de sobra. Excluir ahi es exactamente el falso NO_ELEGIBLE que este sistema
+    existe para no dar.
+    """
+
+    def test_dos_cantidades_sin_umbral_legible_van_a_duda(self):
+        # Sin nada en la cita de donde sacar el umbral.
+        r = decidir([Requisito("empleados", "Staffing requirements apply.",
+                               ("20 employees",))],
+                    {"empleados": "12 employees"})
+        self.assertIs(r.veredicto, Veredicto.NO_SE_PUEDE_SABER)
+
+    def test_numeros_pelados_tambien(self):
+        r = decidir([Requisito("x", "A number is required.", ("50",))],
+                    {"x": "80"})
+        self.assertIs(r.veredicto, Veredicto.NO_SE_PUEDE_SABER)
+
+    def test_una_coincidencia_de_texto_sigue_valiendo(self):
+        # La red va DESPUES del encaje positivo: no puede romper lo que ya
+        # funcionaba.
+        r = decidir([Requisito("x", "cita", ("20 employees",))],
+                    {"x": "20 employees"})
+        self.assertIs(r.veredicto, Veredicto.ELEGIBLE)
+
+    def test_lo_que_no_son_cantidades_se_sigue_excluyendo(self):
+        # La red no puede tragarse los casos normales: si el documento pide
+        # "nonprofit" y el perfil dice "empresa privada", eso es un no.
+        r = decidir([Requisito("tipo", "Open to nonprofits.", ("nonprofit",))],
+                    {"tipo": "empresa privada"})
+        self.assertIs(r.veredicto, Veredicto.NO_ELEGIBLE)
+
+    def test_unidades_distintas_no_activan_la_red(self):
+        # "4 years" contra "3 employees" no son la misma magnitud. Ya iban a
+        # duda por otro camino; lo que importa es que no se rompa.
+        r = decidir([Requisito("x", "Requirements apply.", ("3 employees",))],
+                    {"x": "4 years"})
+        self.assertIn(r.veredicto,
+                      (Veredicto.NO_SE_PUEDE_SABER, Veredicto.NO_ELEGIBLE))

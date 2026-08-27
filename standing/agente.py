@@ -172,6 +172,73 @@ def _trozos(texto: str, tam: int = 18_000, solape: int = 1_500):
     return trozos
 
 
+# Cuantas veces se lee cada trozo, y con cuantas hace falta que aparezca un
+# requisito para creerselo.
+#
+# Existe porque la misma convocatoria daba tres requisitos una vez y cuatro la
+# siguiente, y el veredicto se movia con ello. Temperatura 0 reduce la varianza
+# de Gemini pero no la elimina, y un cribado que contesta distinto en dos
+# ejecuciones no se puede defender ante nadie — que es justo lo que se vende.
+LECTURAS = int(os.environ.get("STANDING_LECTURAS", "3"))
+MINIMO_ACUERDO = 2
+
+
+def _extraer_por_consenso(trozos: list[str]) -> tuple[list[dict], list[str]]:
+    """Lee cada trozo varias veces y se queda con lo que sale repetido.
+
+    Un requisito que solo aparece en una de tres lecturas no es un requisito
+    que el documento enuncie: es ruido del muestreo. Y uno que aparece en las
+    tres es tan solido como puede serlo algo que ha leido un modelo.
+
+    Se agrupa por la CITA normalizada, no por la clave: la clave se la inventa
+    el modelo y puede cambiar de nombre entre lecturas ("antiguedad" y
+    "anos_operando"), mientras que la cita es texto copiado del documento.
+    """
+    from collections import defaultdict
+
+    conteo: dict[str, list[dict]] = defaultdict(list)
+    avisos: list[str] = []
+
+    for n, trozo in enumerate(trozos, 1):
+        vistas = 0
+        for lectura in range(LECTURAS):
+            try:
+                parcial = json.loads(_llamar(trozo))
+            except (json.JSONDecodeError, RuntimeError) as e:
+                avisos.append(f"trozo {n}, lectura {lectura + 1}: "
+                              f"{type(e).__name__} {str(e)[:90]}")
+                continue
+            if not isinstance(parcial, list):
+                avisos.append(f"trozo {n}, lectura {lectura + 1}: el modelo "
+                              f"devolvio {type(parcial).__name__}, no una lista")
+                continue
+            vistas += 1
+            for d in parcial:
+                if isinstance(d, dict) and str(d.get("cita", "")).strip():
+                    conteo[_normalizar_espacios(str(d["cita"]))].append(d)
+        if vistas == 0:
+            avisos.append(f"el trozo {n} de {len(trozos)} no se pudo leer "
+                          f"ninguna vez")
+
+    umbral = min(MINIMO_ACUERDO, LECTURAS)
+    fuera, descartados = [], 0
+    for _, apariciones in conteo.items():
+        if len(apariciones) >= umbral:
+            # La primera aparicion, pero con los valores de la version que mas
+            # trajo: un requisito con lista de valores dice mas que uno vacio,
+            # y quedarse con el vacio perderia informacion que si se leyo.
+            fuera.append(max(apariciones,
+                             key=lambda d: len(d.get("valores") or [])))
+        else:
+            descartados += 1
+
+    if descartados:
+        avisos.append(
+            f"{descartados} requisitos aparecieron en menos de {umbral} de "
+            f"{LECTURAS} lecturas y se descartaron por inestables")
+    return fuera, avisos
+
+
 def extraer_requisitos(texto: str) -> tuple[list[Requisito], list[str]]:
     """Devuelve (requisitos con cita verificada, avisos).
 
@@ -181,21 +248,7 @@ def extraer_requisitos(texto: str) -> tuple[list[Requisito], list[str]]:
     desaparezca en silencio.
     """
     trozos = _trozos(texto)
-    datos, avisos_previos = [], []
-    for n, trozo in enumerate(trozos, 1):
-        bruto = _llamar(trozo)
-        try:
-            parcial = json.loads(bruto)
-        except json.JSONDecodeError:
-            avisos_previos.append(
-                f"el trozo {n} de {len(trozos)} no devolvio JSON valido: "
-                f"{bruto[:120]}")
-            continue
-        if isinstance(parcial, list):
-            datos.extend(parcial)
-        else:
-            avisos_previos.append(
-                f"el trozo {n} devolvio {type(parcial).__name__}, no una lista")
+    datos, avisos_previos = _extraer_por_consenso(trozos)
 
     plano = _normalizar_espacios(texto)
     reqs, avisos = [], list(avisos_previos)
