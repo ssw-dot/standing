@@ -191,6 +191,36 @@ DETERMINED, never to NOT ELIGIBLE:
 | Requirement stated but no values given | cannot determine — the document raises it without defining it |
 | No requirements could be extracted | cannot determine — **an unreadable document is not an authorisation** |
 
+## The pile that does not exist anywhere else
+
+Standing's whole argument is that a false *"not eligible"* is invisible. But
+**why** is it invisible?
+
+Because nobody keeps a record of what they did not apply to. Applications that
+were sent leave a trail — a file, an acknowledgement, a rejection letter. The
+ones that were never sent leave nothing. There is no folder called *calls we
+ruled out*, so there is no way to go back over them.
+
+The PDF fixes that for one screening. The history fixes it for an organisation:
+
+    Which calls did we screen this quarter?
+    Which ones did we rule ourselves out of, and on which sentence?
+    How many were left undecided that nobody ever went back to?
+
+That last question cannot be asked anywhere today. `--historial` answers it, and
+counts the pile out loud.
+
+Only two endpoints exist, and the missing ones are the point: there is no
+`DELETE` and no `PUT`. An audit trail whose rows can be edited or removed is not
+an audit trail, and the whole reason this table exists is to hold the decisions
+nobody else writes down.
+
+Two rules: **saving never blocks a verdict** — if Xano is down the screening
+already happened and the report is still valid — and **the evidence is stored,
+not just the verdict**, because a row saying `NOT ELIGIBLE` and nothing else
+would force you to re-run the screening to learn why, which is the thing the
+history existed to avoid.
+
 ## Sponsor integrations
 
 | Sponsor | What it does here | Why it is not decorative |
@@ -198,6 +228,7 @@ DETERMINED, never to NOT ELIGIBLE:
 | **Nutrient DWS** | PDF → text, with OCR | A local library returns an empty string for a scanned PDF *without saying so* — which this system would read as "no requirements found". OCR keeps "says nothing" and "could not be read" from becoming the same thing. |
 | **SerpApi** | Cited context for open doubts | When the document defers to an external fact, the model will invent a plausible one. Search returns real links, or returns nothing — and nothing is an answer a model never gives. |
 | **Foxit PDF Services** | The report | If someone decides not to apply, the reason has to outlive the session. A PDF with the quotes can be shown to a director or filed. A chat message cannot. |
+| **Xano** | The screening history (`POST` + `GET /cribados`) | One report outlives one session. The history outlives the *decision* — it is the only place the calls you ruled yourself out of are written down, which is the precondition for ever noticing a wrong exclusion. |
 
 Search results never decide a verdict. They add cited context for a human. The
 document decides.
@@ -206,7 +237,7 @@ document decides.
 
 ```bash
 cp .env.example .env        # fill in your four keys
-python -m unittest discover -s tests -p "test_*.py"     # 62 tests, no network
+python -m unittest discover -s tests -p "test_*.py"     # 77 tests, no network
 python -m standing ejemplos/convocatoria.pdf --perfil ejemplos/perfil.json
 ```
 
@@ -232,7 +263,7 @@ gives 200 and 403. Not in the docs.
 
 ## Tests
 
-62 tests, no network, no credentials. Most of them assert the same thing from
+77 tests, no network, no credentials. Most of them assert the same thing from
 different angles: **that a doubt does not turn into an exclusion.**
 
 A forecasting bug announces itself. This one does not — it returns a confident

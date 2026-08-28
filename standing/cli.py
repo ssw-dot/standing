@@ -22,6 +22,7 @@ from pathlib import Path
 from .agente import extraer_requisitos
 from .busqueda import buscar
 from .documento import extraer
+from .historial import guardar, listar, resumen
 from .informe import html_a_pdf
 from .render import informe_html
 from .veredicto import Veredicto, decidir
@@ -32,9 +33,11 @@ SALIDA = {Veredicto.ELEGIBLE: 0, Veredicto.NO_ELEGIBLE: 1,
 
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="standing", description=__doc__)
-    ap.add_argument("pdf", type=Path)
-    ap.add_argument("--perfil", type=Path, required=True,
-                    help="JSON con tus datos: pais, tipo_de_entidad, etc.")
+    ap.add_argument("pdf", type=Path, nargs="?",
+                    help="el PDF de la convocatoria")
+    ap.add_argument("--perfil", type=Path,
+                    help="JSON con tus datos: pais, tipo_de_entidad, etc. "
+                         "Obligatorio salvo con --historial.")
     ap.add_argument("--salida", type=Path, default=Path("informe.pdf"))
     ap.add_argument("--sin-ocr", action="store_true",
                     help="ahorra creditos si el PDF ya tiene capa de texto")
@@ -42,10 +45,37 @@ def main(argv: list[str] | None = None) -> int:
                     help="no consultar SerpApi para las dudas")
     ap.add_argument("--texto", action="store_true",
                     help="solo por consola, sin generar PDF")
+    ap.add_argument("--sin-historial", action="store_true",
+                    help="no guardar este cribado en Xano")
+    ap.add_argument("--historial", action="store_true",
+                    help="enseñar los cribados guardados y salir")
     a = ap.parse_args(argv)
 
-    if not a.pdf.exists():
-        print(f"no existe {a.pdf}", file=sys.stderr)
+    if a.historial:
+        # Aqui SI se puede fallar sin historial —lo unico que se pidio fue
+        # leerlo—, pero con un mensaje que diga como arreglarlo, no con una
+        # traza. Una traza obliga a leer el codigo para entender que falta.
+        from .historial import SinXano
+        try:
+            print()
+            print(resumen(listar()))
+            print()
+        except SinXano as e:
+            print(str(e), file=sys.stderr)
+            return 3
+        except Exception as e:                 # noqa: BLE001
+            print(f"no se pudo leer el historial: {str(e)[:200]}", file=sys.stderr)
+            return 3
+        return 0
+
+    if a.pdf is None or not a.pdf.exists():
+        print(f"no existe {a.pdf}" if a.pdf else "falta el PDF de la convocatoria",
+              file=sys.stderr)
+        return 3
+    if a.perfil is None or not a.perfil.exists():
+        print(f"no existe {a.perfil}" if a.perfil
+              else "falta --perfil: un JSON con tus datos (pais, tipo, etc.)",
+              file=sys.stderr)
         return 3
     perfil = json.loads(a.perfil.read_text(encoding="utf-8"))
 
@@ -90,6 +120,15 @@ def main(argv: list[str] | None = None) -> int:
         print(f"  [{marca}] {c.requisito.clave}: {c.motivo}")
     for w in res.avisos:
         print(f"  aviso: {w}")
+
+    if not a.sin_historial:
+        # Se guarda DESPUES de decidir y ANTES de generar el PDF: si Xano
+        # falla, el veredicto ya esta hecho y el informe se genera igual. El
+        # registro es valioso, pero no es la razon de ser de la ejecucion.
+        ok, nota = guardar(res, documento=a.pdf.name, perfil=perfil)
+        print(f"      {nota}")
+        if not ok:
+            res.avisos.append(nota)
 
     if not a.texto:
         print(f"\n[5/5] generando {a.salida}...", flush=True)
