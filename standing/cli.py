@@ -24,6 +24,7 @@ from .busqueda import buscar
 from .documento import extraer
 from .historial import guardar, listar, resumen
 from .informe import html_a_pdf
+from .red import RAIZ
 from .render import informe_html
 from .veredicto import Veredicto, decidir
 
@@ -47,6 +48,9 @@ def main(argv: list[str] | None = None) -> int:
                     help="solo por consola, sin generar PDF")
     ap.add_argument("--sin-historial", action="store_true",
                     help="no guardar este cribado en Xano")
+    ap.add_argument("--doctavian", action="store_true",
+                    help="componer el informe con la plantilla DOCX de "
+                         "Doctavian en vez de con el HTML interno.")
     ap.add_argument("--historial", action="store_true",
                     help="enseñar los cribados guardados y salir")
     a = ap.parse_args(argv)
@@ -81,6 +85,8 @@ def main(argv: list[str] | None = None) -> int:
 
     print(f"[1/5] leyendo {a.pdf.name}...", flush=True)
     doc = extraer(a.pdf, ocr=not a.sin_ocr)
+    if doc.aviso:
+        print(f"      AVISO: {doc.aviso}", file=sys.stderr)
     if doc.parece_vacio:
         print("      AVISO: apenas se extrajo texto. Puede ser un PDF "
               "escaneado sin OCR, o una portada.", file=sys.stderr)
@@ -97,6 +103,8 @@ def main(argv: list[str] | None = None) -> int:
     print("[3/5] comparando contra tu perfil...", flush=True)
     res = decidir(reqs, perfil, remite=remite)
     res.avisos.extend(avisos)
+    if doc.aviso:
+        res.avisos.append(doc.aviso)
     if doc.parece_vacio:
         res.avisos.append(
             "del documento se extrajeron menos de 200 caracteres. Si estaba "
@@ -132,8 +140,19 @@ def main(argv: list[str] | None = None) -> int:
 
     if not a.texto:
         print(f"\n[5/5] generando {a.salida}...", flush=True)
-        html_a_pdf(informe_html(res, fuente=a.pdf.name, perfil=perfil,
-                                contexto=contexto), a.salida)
+        if a.doctavian:
+            # La diferencia no es el formato de salida, son dos sitios donde
+            # puede vivir la forma del informe. Por defecto la compone este
+            # programa y Foxit la imprime. Con --doctavian la compone una
+            # plantilla DOCX que se abre en Word: el bucle sobre los requisitos
+            # y las secciones que desaparecen dejan de ser codigo.
+            from .doctavian import informe as informe_doctavian
+            informe_doctavian(res, documento=a.pdf.name, perfil=perfil,
+                              plantilla=RAIZ / "plantilla" / "informe.docx",
+                              salida=a.salida)
+        else:
+            html_a_pdf(informe_html(res, fuente=a.pdf.name, perfil=perfil,
+                                    contexto=contexto), a.salida)
         print(f"      {a.salida} ({a.salida.stat().st_size // 1024} KB)")
 
     return SALIDA[res.veredicto]

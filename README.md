@@ -237,7 +237,7 @@ document decides.
 
 ```bash
 cp .env.example .env        # fill in your four keys
-python -m unittest discover -s tests -p "test_*.py"     # 77 tests, no network
+python -m unittest discover -s tests -p "test_*.py"     # 89 tests, no network
 python -m standing ejemplos/convocatoria.pdf --perfil ejemplos/perfil.json
 ```
 
@@ -263,7 +263,7 @@ gives 200 and 403. Not in the docs.
 
 ## Tests
 
-77 tests, no network, no credentials. Most of them assert the same thing from
+89 tests, no network, no credentials. Most of them assert the same thing from
 different angles: **that a doubt does not turn into an exclusion.**
 
 A forecasting bug announces itself. This one does not — it returns a confident

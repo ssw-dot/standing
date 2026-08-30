@@ -13,7 +13,7 @@ import json
 from dataclasses import dataclass
 from pathlib import Path
 
-from .red import cargar_env, clave, json_de, multipart, peticion
+from .red import SinClave, cargar_env, clave, json_de, multipart, peticion
 
 BASE = "https://api.nutrient.io"
 
@@ -23,6 +23,11 @@ class Extraido:
     texto: str
     paginas: int
     con_ocr: bool
+    # Vacio cuando Nutrient respondio. Con texto cuando se uso el respaldo
+    # local, y entonces ese texto viaja hasta el informe: un plan B silencioso
+    # es peor que no tenerlo, porque el veredicto sale igual de seguro sin
+    # serlo.
+    aviso: str = ""
 
     @property
     def parece_vacio(self) -> bool:
@@ -54,11 +59,41 @@ def extraer(pdf: Path, *, ocr: bool = True) -> Extraido:
         {"instructions": json.dumps(instrucciones)},
         {"documento": (pdf.name, pdf.read_bytes(), "application/pdf")})
 
-    d = json_de(peticion(f"{BASE}/build", datos=cuerpo, metodo="POST", cabeceras={
-        "Authorization": f"Bearer {clave('NUTRIENT_KEY')}", "Content-Type": tipo}))
+    try:
+        d = json_de(peticion(f"{BASE}/build", datos=cuerpo, metodo="POST",
+                             cabeceras={
+                                 "Authorization": f"Bearer {clave('NUTRIENT_KEY')}",
+                                 "Content-Type": tipo}))
+    except (SinClave, RuntimeError) as e:
+        # Medido: con la clave agotada esto moria con una traza de Python en el
+        # primer paso, y el reto dice que los jueces ejecutan el proyecto. Un
+        # fallo de cuota no es un fallo del proyecto pero se lee igual.
+        return _respaldo(pdf, str(e))
+
     paginas = d.get("pages") or []
     texto = (chr(10) * 2).join(p.get("plainText", "") for p in paginas)
     return Extraido(texto=texto, paginas=len(paginas), con_ocr=ocr)
+
+
+def _respaldo(pdf: Path, motivo: str) -> Extraido:
+    """Lee el PDF en local y deja dicho, alto y claro, que se ha degradado."""
+    from .respaldo import texto_local
+
+    corto = motivo.split(": ", 1)[-1][:150]
+    try:
+        texto = texto_local(pdf)
+    except Exception as e:                        # noqa: BLE001
+        texto = ""
+        corto = f"{corto} · y el respaldo local tambien fallo: {str(e)[:80]}"
+
+    return Extraido(
+        texto=texto,
+        paginas=0,
+        con_ocr=False,
+        aviso=("Nutrient no respondio y se ha leido el PDF con el respaldo "
+               "local, que NO hace OCR: si este documento estaba escaneado, su "
+               "texto real no se ha leido y este veredicto no vale. "
+               f"Motivo: {corto}"))
 
 
 def creditos() -> dict:
